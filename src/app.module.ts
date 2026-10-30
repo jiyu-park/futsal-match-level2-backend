@@ -10,6 +10,12 @@ import { ApplicationsController } from './applications/applications.controller.j
 import { ApplicationsService } from './applications/applications.service.js';
 import { StatsController } from './admin/stats.controller.js';
 import { AdminController } from './admin/admin.controller.js';
+import { AuthController } from './auth/auth.controller.js';
+import { AuthService } from './auth/auth.service.js';
+import { ReviewsController } from './reviews/reviews.controller.js';
+import { ReviewsService } from './reviews/reviews.service.js';
+import { UsersController } from './users/users.controller.js';
+import { UsersService } from './users/users.service.js';
 
 @Module({
   imports: [DbModule],
@@ -20,7 +26,18 @@ import { AdminController } from './admin/admin.controller.js';
     ApplicationsController,
     StatsController,
     AdminController,
+    AuthController,
+    ReviewsController,
+    UsersController,
   ],
-  providers: [SetupService, StadiumsService, PostsService, ApplicationsService],
+  providers: [
+    SetupService,
+    StadiumsService,
+    PostsService,
+    ApplicationsService,
+    AuthService,
+    ReviewsService,
+    UsersService,
+  ],
 })
 export class AppModule {}

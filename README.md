@@ -1,7 +1,7 @@
-# 서울 풋살 매칭 - 백엔드 (NestJS + PostgreSQL) · Level 2
+# 서울 풋살 매칭 - 백엔드 (NestJS + PostgreSQL) · Level 2 + 로그인·기록·후기
 
 서울 풋살장별 모집글에 참가 신청·취소를 하고, 정원·중복·신청 기간 규칙을 서버가 지키는 서비스입니다.
-기획 내용은 [기획서.md](기획서.md)를 보세요. 화면은 `futsal-match-level2-frontend` 저장소입니다.
+기획 내용은 [기획서.md](기획서.md)(Level 2)와 [기획서_확장.md](기획서_확장.md)(로그인·참가 기록·매너 후기)를 보세요. 화면은 `futsal-match-level2-frontend` 저장소입니다.
 
 ## ⏳ 무료 서버 안내
 이 백엔드는 Render **무료 서버**에 올라가 있어서, 한동안 접속이 없으면 잠들어 있다가 **첫 접속이 30초~1분 정도 느릴 수 있습니다.** 화면이 비어 있거나 오류가 보이면 잠시 기다렸다가 새로고침해 주세요. 먼저 `/health` 주소를 열어 깨워 두면 편합니다.
@@ -21,12 +21,16 @@
 | `GET /health` | 서버와 DB 연결 상태 |
 | `GET /posts` | 모집글 목록. 검색 `q`, 구 `district`, 실력 `skill_level`, 상태 `status`(open·full·ended). 신청 수·남은 자리 포함 |
 | `GET /posts/:id` | 모집글 상세 |
-| `POST /posts` · `PATCH /posts/:id` · `DELETE /posts/:id` | 모집글 등록·수정·삭제 (4자리 글 비밀번호) |
+| `POST /posts` · `PATCH /posts/:id` · `DELETE /posts/:id` | 모집글 등록(로그인 필요)·수정·삭제(글 주인·관리자. 로그인 전 예전 글은 4자리 비밀번호) |
 | `GET /posts/:id/applications` | 신청 명단 (이름만) |
-| `POST /posts/:id/applications` | 참가 신청 (이름, 연락 방법, 취소용 4자리 비밀번호) |
-| `DELETE /applications/:id` | 신청 취소 (본문 `password`) |
+| `POST /posts/:id/applications` | 참가 신청 (로그인 필요) |
+| `DELETE /applications/:id` | 신청 취소 (신청한 본인·관리자. 로그인 전 예전 신청은 본문 `password`) |
+| `POST /auth/signup` · `POST /auth/login` · `GET /auth/me` | 회원가입 · 로그인(토큰 발급) · 내 정보 |
+| `PATCH /applications/:id/attendance` | 참석/불참 표시 (경기 시작 후, 글 주인·관리자) |
+| `GET /posts/:id/participants` · `GET/POST /posts/:id/reviews` | 함께 뛴 사람 · 매너 후기 보기·남기기 |
+| `GET /users/:id` · `GET /me/history` | 프로필(출석률·노쇼·매너 점수) · 내 참가 기록 |
 | `GET /stats` | 현황 숫자 3개 (오늘 신청 수, 신청 가능한 모집글 수, 남은 자리 합계) |
-| `POST /admin/reset-demo` | 가상 데이터 다시 채우기 (헤더 `x-admin-password`) |
+| `POST /admin/reset-demo` | 가상 데이터 다시 채우기 (관리자 계정 또는 헤더 `x-admin-password`) |
 | `GET /stadiums` · `POST/PATCH/DELETE /stadiums` | 경기장 조회 / 등록·수정·삭제 (관리자 비밀번호) |
 
 필수 칸·숫자·날짜 등의 규칙은 모두 백엔드가 검사하고 칸별 쉬운 한국어 오류(`errors`)를 돌려줍니다.
@@ -58,7 +62,8 @@ npm run start
 |---|---|
 | `DATABASE_URL` | PostgreSQL 주소 (Render DB의 Internal 주소 권장) |
 | `DB_SCHEMA` | 같은 DB를 다른 앱과 나눠 쓸 때 이 앱의 테이블을 담을 구역 이름. 이 앱은 `level2` |
-| `ADMIN_PASSWORD` | 경기장 관리와 가상 데이터 다시 채우기용 관리자 비밀번호 |
+| `JWT_SECRET` | 로그인 토큰을 만들 때 쓰는 비밀 문자열. 길고 무작위로 정하고 절대 공개하지 않습니다. (예: `openssl rand -hex 32`) |
+| `ADMIN_PASSWORD` | 관리자 계정 없이 쓸 수 있는 관리자 비밀번호(경기장 관리·가상 데이터 다시 채우기) |
 | `FRONTEND_URL` | 접속을 허용할 프론트엔드(Vercel) 주소. 끝에 `/` 없이 |
 | `NODE_VERSION` | `22` |
 
@@ -68,4 +73,11 @@ npm run start
 
 ## 경기장 데이터 출처
 이름과 주소를 공식·예약 안내 페이지(서울시설공단, 서울시 우리동네 체육시설, 노원구시설관리공단, 성동구도시관리공단, 플랩풋볼 구장 정보)에서 확인했습니다. 시설 상황은 바뀔 수 있으니 경기장 화면에서 수정할 수 있습니다.
-모집글·신청자·연락처는 모두 가상입니다. 가상 글과 신청의 비밀번호는 `1234`입니다.
+## 확인용 가상 계정
+| 역할 | 이메일 | 비밀번호 |
+|---|---|---|
+| 관리자 | admin@futsal.test | admin1234 |
+| 일반 | user1@futsal.test (user2, user3도 같음) | user1234 |
+
+처음 켜면 이 계정과, 참석 표시·매너 후기가 들어 있는 끝난 경기 2개, 로그인 시험용 모집글이 함께 들어갑니다.
+모집글·신청자·연락처는 모두 가상입니다. 로그인 전 방식의 가상 글과 신청의 비밀번호는 `1234`입니다.

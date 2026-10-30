@@ -7,6 +7,7 @@ import {
 import bcrypt from 'bcryptjs';
 import type pg from 'pg';
 import { PG_POOL } from '../db/db.module.js';
+import { AuthUser, requireUser } from '../auth/auth.util.js';
 import {
   FieldErrors,
   isRealDate,
@@ -29,8 +30,10 @@ const SELECT_POST = `
          s.address AS stadium_address, s.map_url AS stadium_map_url,
          (SELECT COUNT(*)::int FROM applications a WHERE a.post_id = p.id) AS applied_count,
          ((p.play_date + p.play_time) <= (now() AT TIME ZONE 'Asia/Seoul')) AS is_ended,
-         p.play_time AS play_time_raw
-    FROM posts p JOIN stadiums s ON s.id = p.stadium_id`;
+         p.play_time AS play_time_raw,
+         p.user_id AS owner_id, u.nickname AS owner_nickname
+    FROM posts p JOIN stadiums s ON s.id = p.stadium_id
+    LEFT JOIN users u ON u.id = p.user_id`;
 
 const WITH_STATUS = `
   SELECT t.*, GREATEST(t.capacity - t.applied_count, 0) AS remaining
@@ -85,7 +88,7 @@ export class PostsService {
   }
 
   // 등록과 수정에서 같은 규칙을 쓴다
-  private async validate(body: any) {
+  private async validate(body: any, fallbackAuthor = '') {
     const errors: FieldErrors = {};
 
     const stadiumId = toWholeNumber(body?.stadium_id);
@@ -119,7 +122,7 @@ export class PostsService {
     else if (capacity < 1) errors.capacity = '모집 인원은 1명 이상으로 적어 주세요.';
     else if (capacity > 100000) errors.capacity = '모집 인원이 너무 많아요. 다시 확인해 주세요.';
 
-    const authorName = text(body?.author_name);
+    const authorName = text(body?.author_name) || fallbackAuthor;
     if (!authorName) errors.author_name = '작성자 이름을 적어 주세요.';
     else if (authorName.length > 30) errors.author_name = '작성자 이름은 30자 이내로 적어 주세요.';
 
@@ -142,31 +145,28 @@ export class PostsService {
     return { errors, values: { stadiumId, sport, title, playDate, playTime, capacity, authorName, contact, skillLevel, fee, description } };
   }
 
-  private checkPassword(body: any, errors: FieldErrors, required: boolean) {
-    const password = typeof body?.password === 'string' ? body.password : '';
-    if (!password) errors.password = '비밀번호를 적어 주세요. (숫자 4자리)';
-    else if (!/^\d{4}$/.test(password)) errors.password = '비밀번호는 숫자 4자리로 적어 주세요.';
-    return password;
-  }
-
-  async create(body: any) {
-    const { errors, values: v } = await this.validate(body);
-    const password = this.checkPassword(body, errors, true);
+  // 로그인한 사람만 글을 올릴 수 있고, 그 사람이 글의 주인이 된다
+  async create(body: any, user: AuthUser | null) {
+    const me = requireUser(user);
+    const nick = await this.pool.query('SELECT nickname FROM users WHERE id = $1', [me.id]);
+    if (!nick.rowCount) requireUser(null);
+    const { errors, values: v } = await this.validate(body, nick.rows[0].nickname);
     throwIfErrors(errors);
-    const hash = await bcrypt.hash(password, 10);
     const { rows } = await this.pool.query(
       `INSERT INTO posts (stadium_id, sport, title, play_date, play_time, capacity,
-                          author_name, contact, skill_level, fee, description, password_hash)
+                          author_name, contact, skill_level, fee, description, user_id)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
       [v.stadiumId, v.sport, v.title, v.playDate, v.playTime, v.capacity,
-       v.authorName, v.contact, v.skillLevel, v.fee, v.description || null, hash],
+       v.authorName, v.contact, v.skillLevel, v.fee, v.description || null, me.id],
     );
     return this.get(rows[0].id);
   }
 
-  async update(id: number, body: any) {
-    await this.verifyPassword(id, body);
-    const { errors, values: v } = await this.validate(body);
+  async update(id: number, body: any, user: AuthUser | null) {
+    await this.authorize(id, body, user);
+    // 작성자 이름을 비워 보내면 기존 이름을 그대로 둔다
+    const current = await this.pool.query('SELECT author_name FROM posts WHERE id = $1', [id]);
+    const { errors, values: v } = await this.validate(body, current.rows[0].author_name);
     throwIfErrors(errors);
     // 이미 신청한 사람보다 모집 인원을 줄일 수 없다
     const applied = await this.pool.query(
@@ -188,19 +188,31 @@ export class PostsService {
     return this.get(id);
   }
 
-  async remove(id: number, body: any) {
-    await this.verifyPassword(id, body);
+  async remove(id: number, body: any, user: AuthUser | null) {
+    await this.authorize(id, body, user);
     await this.pool.query('DELETE FROM posts WHERE id = $1', [id]);
     return { deleted: true };
   }
 
-  // 수정·삭제 전에 글을 쓸 때 정한 비밀번호가 맞는지 확인한다
+  // 수정·삭제는 글 주인이나 관리자만 할 수 있다.
+  // 주인이 없는 예전 글(로그인 도입 전)은 글을 쓸 때 정한 4자리 비밀번호로 한다.
+  async authorize(id: number, body: any, user: AuthUser | null) {
+    const { rows } = await this.pool.query('SELECT user_id FROM posts WHERE id = $1', [id]);
+    if (!rows.length) throw new NotFoundException('찾을 수 없는 글입니다.');
+    const ownerId = rows[0].user_id;
+    if (user && (user.role === 'admin' || user.id === ownerId)) return;
+    if (ownerId === null) return this.verifyPassword(id, body);
+    if (!user) requireUser(null);
+    throw new ForbiddenException('내가 올린 글만 고치거나 지울 수 있어요.');
+  }
+
+  // 주인이 없는 예전 글의 비밀번호가 맞는지 확인한다
   async verifyPassword(id: number, body: any) {
     const { rows } = await this.pool.query('SELECT password_hash FROM posts WHERE id = $1', [id]);
     if (!rows.length) throw new NotFoundException('찾을 수 없는 글입니다.');
     const password = typeof body?.password === 'string' ? body.password : '';
     if (!password) throwIfErrors({ password: '비밀번호를 적어 주세요. (숫자 4자리)' });
-    const ok = await bcrypt.compare(password, rows[0].password_hash);
+    const ok = rows[0].password_hash ? await bcrypt.compare(password, rows[0].password_hash) : false;
     if (!ok) throw new ForbiddenException('비밀번호가 맞지 않습니다.');
   }
 }

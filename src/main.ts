@@ -9,7 +9,7 @@ async function bootstrap() {
     .map((url) => url.trim());
   app.enableCors({
     origin: origins,
-    allowedHeaders: ['Content-Type', 'x-admin-password'],
+    allowedHeaders: ['Content-Type', 'x-admin-password', 'Authorization'],
     methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
   });
   await app.listen(process.env.PORT ?? 3001);

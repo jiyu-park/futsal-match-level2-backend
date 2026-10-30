@@ -11,6 +11,8 @@ import {
   Query,
 } from '@nestjs/common';
 import { PostsService } from './posts.service.js';
+import type { AuthUser } from '../auth/auth.util.js';
+import { CurrentUser } from '../auth/current-user.decorator.js';
 
 @Controller('posts')
 export class PostsController {
@@ -27,14 +29,14 @@ export class PostsController {
   }
 
   @Post()
-  create(@Body() body: unknown) {
-    return this.posts.create(body);
+  create(@Body() body: unknown, @CurrentUser() user: AuthUser | null) {
+    return this.posts.create(body, user);
   }
 
   // 비밀번호(body.password)가 맞을 때만 수정·삭제한다
   @Patch(':id')
-  update(@Param('id', ParseIntPipe) id: number, @Body() body: unknown) {
-    return this.posts.update(id, body);
+  update(@Param('id', ParseIntPipe) id: number, @Body() body: unknown, @CurrentUser() user: AuthUser | null) {
+    return this.posts.update(id, body, user);
   }
 
   @Post(':id/check-password')
@@ -45,7 +47,7 @@ export class PostsController {
   }
 
   @Delete(':id')
-  remove(@Param('id', ParseIntPipe) id: number, @Body() body: unknown) {
-    return this.posts.remove(id, body);
+  remove(@Param('id', ParseIntPipe) id: number, @Body() body: unknown, @CurrentUser() user: AuthUser | null) {
+    return this.posts.remove(id, body, user);
   }
 }
